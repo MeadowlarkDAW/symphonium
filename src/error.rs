@@ -18,7 +18,7 @@ pub enum LoadError {
         got_channels: usize,
     },
     #[cfg(feature = "resampler")]
-    ErrorWhileResampling(rubato::ResampleError),
+    ErrorWhileResampling(fixed_resample::rubato::ResampleError),
 }
 
 impl Error for LoadError {}
@@ -65,8 +65,8 @@ impl From<std::io::Error> for LoadError {
 }
 
 #[cfg(feature = "resampler")]
-impl From<rubato::ResampleError> for LoadError {
-    fn from(e: rubato::ResampleError) -> Self {
+impl From<fixed_resample::rubato::ResampleError> for LoadError {
+    fn from(e: fixed_resample::rubato::ResampleError) -> Self {
         Self::ErrorWhileResampling(e)
     }
 }

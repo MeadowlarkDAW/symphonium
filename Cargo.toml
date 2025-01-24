@@ -1,6 +1,6 @@
 [package]
 name = "symphonium"
-version = "0.2.2"
+version = "0.3.0"
 edition = "2021"
 license = "MPL-2.0"
 readme = "README.md"
@@ -90,16 +90,16 @@ opt-simd = [
 ]
 
 # Enable the resampler (enabled by default).
-resampler = ["dep:rubato"]
+resampler = ["dep:fixed-resample"]
 
-# This feature is enabled by default and is recommended for most
-# applications. Disable it if the FFT resamplers are not needed
-# to save compile time and reduce the resulting binary size.
-fft-resampler = ["resampler", "rubato?/fft_resampler"]
+# Enables the fft-based resampling algorithm used for the `Normal`
+# resampling quality. This is recommended for most use cases.
+# Disable if you only need the `Low` resampling quality.
+fft-resampler = ["resampler", "fixed-resample?/fft-resampler"]
 
 [dependencies]
 symphonia = { version = "0.5.4", default-features = false }
-rubato = { version = "0.16.0", default-features = false, optional = true }
+fixed-resample = { version = "0.1.5", default-features = false, optional = true }
 log = "0.4"
 
 [dev-dependencies]

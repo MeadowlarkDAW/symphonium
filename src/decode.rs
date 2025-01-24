@@ -20,7 +20,7 @@ pub(crate) fn decode_resampled(
     pcm_sample_rate: u32,
     target_sample_rate: u32,
     n_channels: usize,
-    mut resampler: crate::ResamplerRefMut,
+    resampler: &mut fixed_resample::NonRtResampler<f32>,
     max_bytes: usize,
 ) -> Result<DecodedAudioF32, LoadError> {
     assert_ne!(n_channels, 0);
@@ -50,53 +50,23 @@ pub(crate) fn decode_resampled(
         .map_err(|e| LoadError::CouldNotCreateDecoder(e))?;
 
     let mut tmp_conversion_buf: Option<AudioBuffer<f32>> = None;
-    let mut tmp_resampler_in_buf = vec![vec![0.0; resampler.input_frames_max()]; n_channels];
-    let mut tmp_resampler_out_buf = vec![vec![0.0; resampler.output_frames_max()]; n_channels];
-    let mut tmp_resampler_in_len = 0;
 
-    let estimated_final_frames = (file_frames.unwrap_or(44100) as f64
-        * (target_sample_rate as f64 / pcm_sample_rate as f64))
-        .ceil() as usize
-        + resampler.output_frames_max();
+    let alloc_final_frames = resampler.out_alloc_frames(
+        pcm_sample_rate,
+        target_sample_rate,
+        file_frames.unwrap_or(44100) as usize,
+    );
     let mut final_buf: Vec<Vec<f32>> = (0..n_channels)
         .map(|_| {
             let mut m = Vec::new();
-            m.reserve_exact(estimated_final_frames);
+            m.reserve_exact(alloc_final_frames);
             m
         })
         .collect();
 
-    let mut total_in_frames: usize = 0;
-
     let track_id = track.id;
 
-    let mut desired_tmp_in_frames = resampler.input_frames_next();
-    let mut delay_frames_left = resampler.output_delay();
-
-    let mut resample = |tmp_resampler_in_buf: &Vec<Vec<f32>>,
-                        tmp_resampler_out_buf: &mut Vec<Vec<f32>>,
-                        final_buf: &mut Vec<Vec<f32>>,
-                        tmp_resampler_in_len: &mut usize,
-                        desired_tmp_in_frames: &mut usize|
-     -> Result<(), LoadError> {
-        let (_, output_frames) =
-            resampler.process_into_buffer(tmp_resampler_in_buf, tmp_resampler_out_buf, None)?;
-
-        if delay_frames_left >= output_frames {
-            // Wait until the first non-delayed output sample.
-            delay_frames_left -= output_frames;
-        } else {
-            for (final_ch, res_ch) in final_buf.iter_mut().zip(tmp_resampler_out_buf.iter()) {
-                final_ch.extend_from_slice(&res_ch[delay_frames_left..output_frames]);
-            }
-            delay_frames_left = 0;
-        }
-
-        *desired_tmp_in_frames = resampler.input_frames_next();
-        *tmp_resampler_in_len = 0;
-
-        Ok(())
-    };
+    let mut total_in_frames: usize = 0;
 
     while let Ok(packet) = probed.format.next_packet() {
         // If the packet does not belong to the selected track, skip over it.
@@ -123,37 +93,19 @@ pub(crate) fn decode_resampled(
                 }
 
                 decoded.convert(tmp_conversion_buf);
-                let tmp_conversion_planes = tmp_conversion_buf.planes();
-                let converted_planes = tmp_conversion_planes.planes();
 
-                // Fill the temporary input buffer for the resampler.
                 let decoded_frames = tmp_conversion_buf.frames();
-                let mut total_copied_frames = 0;
-                while total_copied_frames < decoded_frames {
-                    let copy_frames = (decoded_frames - total_copied_frames)
-                        .min(desired_tmp_in_frames - tmp_resampler_in_len);
-                    for (tmp_ch, decoded_ch) in
-                        tmp_resampler_in_buf.iter_mut().zip(converted_planes)
-                    {
-                        tmp_ch[tmp_resampler_in_len..tmp_resampler_in_len + copy_frames]
-                            .copy_from_slice(
-                                &decoded_ch[total_copied_frames..total_copied_frames + copy_frames],
-                            );
-                    }
+                total_in_frames += decoded_frames;
 
-                    tmp_resampler_in_len += copy_frames;
-                    if tmp_resampler_in_len == desired_tmp_in_frames {
-                        resample(
-                            &tmp_resampler_in_buf,
-                            &mut tmp_resampler_out_buf,
-                            &mut final_buf,
-                            &mut tmp_resampler_in_len,
-                            &mut desired_tmp_in_frames,
-                        )?;
-                    }
-
-                    total_copied_frames += copy_frames;
-                }
+                resampler.process(
+                    tmp_conversion_buf.planes().planes(),
+                    |in_buf, in_buf_frames| {
+                        for (out_ch, in_ch) in final_buf.iter_mut().zip(in_buf.iter()) {
+                            out_ch.extend_from_slice(&in_ch[..in_buf_frames]);
+                        }
+                    },
+                    false,
+                );
 
                 if file_frames.is_none() {
                     // Protect against really large files causing out of memory errors.
@@ -161,53 +113,30 @@ pub(crate) fn decode_resampled(
                         return Err(LoadError::FileTooLarge(max_bytes));
                     }
                 }
-
-                total_in_frames += decoded_frames;
             }
             Err(symphonia::core::errors::Error::DecodeError(err)) => decode_warning(err),
             Err(e) => return Err(LoadError::ErrorWhileDecoding(e)),
         }
     }
 
-    let total_frames = (total_in_frames as f64
-        * (target_sample_rate as f64 / pcm_sample_rate as f64))
-        .ceil() as usize;
+    let out_frames = resampler.out_frames(pcm_sample_rate, target_sample_rate, total_in_frames);
 
-    // Process any leftover samples.
-    if tmp_resampler_in_len > 0 {
-        // Zero-pad remaining samples.
-        for ch in tmp_resampler_in_buf.iter_mut() {
-            ch[tmp_resampler_in_len..desired_tmp_in_frames].fill(0.0);
-        }
-
-        resample(
-            &tmp_resampler_in_buf,
-            &mut tmp_resampler_out_buf,
-            &mut final_buf,
-            &mut tmp_resampler_in_len,
-            &mut desired_tmp_in_frames,
-        )?;
+    // Process any leftover samples in the resampler.
+    while final_buf[0].len() < out_frames {
+        resampler.process::<&[f32]>(
+            &[],
+            |in_buf, in_buf_frames| {
+                for (out_ch, in_ch) in final_buf.iter_mut().zip(in_buf.iter()) {
+                    out_ch.extend_from_slice(&in_ch[..in_buf_frames]);
+                }
+            },
+            true,
+        );
     }
 
-    // Extract any leftover samples from the resampler.
-    while final_buf[0].len() < total_frames {
-        // Clear samples.
-        for ch in tmp_resampler_in_buf.iter_mut() {
-            ch[..desired_tmp_in_frames].fill(0.0);
-        }
-
-        resample(
-            &tmp_resampler_in_buf,
-            &mut tmp_resampler_out_buf,
-            &mut final_buf,
-            &mut tmp_resampler_in_len,
-            &mut desired_tmp_in_frames,
-        )?;
-    }
-
-    // Truncate the extra padded data.
+    // Truncate any extra padded zeros off the end.
     for ch in final_buf.iter_mut() {
-        ch.resize(total_frames, 0.0);
+        ch.resize(out_frames, 0.0);
 
         // If the allocated capacity is significantly greater than the
         // length, shrink it to save memory.

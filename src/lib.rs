@@ -4,6 +4,7 @@ use std::path::Path;
 #[cfg(feature = "resampler")]
 use std::collections::HashMap;
 
+use fixed_resample::NonRtResampler;
 use symphonia::core::codecs::CodecRegistry;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::{MediaSource, MediaSourceStream};
@@ -21,7 +22,7 @@ pub mod resample;
 #[cfg(feature = "resampler")]
 pub use resample::ResampleQuality;
 #[cfg(feature = "resampler")]
-use resample::{ResamplerKey, ResamplerOwned, ResamplerParams, ResamplerRefMut};
+use resample::{ResamplerKey, ResamplerParams};
 
 mod decode;
 mod resource;
@@ -38,7 +39,7 @@ pub static DEFAULT_MAX_BYTES: usize = 1_000_000_000;
 pub struct SymphoniumLoader {
     // Re-use resamplers to improve performance.
     #[cfg(feature = "resampler")]
-    resamplers: HashMap<ResamplerKey, ResamplerOwned>,
+    resamplers: HashMap<ResamplerKey, NonRtResampler<f32>>,
 
     codec_registry: &'static CodecRegistry,
     probe: &'static Probe,
@@ -165,7 +166,7 @@ impl SymphoniumLoader {
         path: P,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> ResamplerRefMut<'a>,
+        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
     ) -> Result<DecodedAudio, LoadError> {
         let source = load_file(path, self.probe)?;
 
@@ -198,7 +199,7 @@ impl SymphoniumLoader {
         hint: Option<Hint>,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> ResamplerRefMut<'a>,
+        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
     ) -> Result<DecodedAudio, LoadError> {
         let source = load_audio_source(source, hint, self.probe)?;
 
@@ -322,7 +323,7 @@ impl SymphoniumLoader {
         path: P,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> ResamplerRefMut<'a>,
+        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
     ) -> Result<DecodedAudioF32, LoadError> {
         let source = load_file(path, self.probe)?;
 
@@ -356,7 +357,7 @@ impl SymphoniumLoader {
         hint: Option<Hint>,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> ResamplerRefMut<'a>,
+        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
     ) -> Result<DecodedAudioF32, LoadError> {
         let source = load_audio_source(source, hint, self.probe)?;
 
@@ -450,7 +451,9 @@ fn decode<'a>(
     codec_registry: &'static CodecRegistry,
     max_bytes: Option<usize>,
     #[cfg(feature = "resampler")] target_sample_rate: Option<u32>,
-    #[cfg(feature = "resampler")] get_resampler: impl FnOnce(ResamplerParams) -> ResamplerRefMut<'a>,
+    #[cfg(feature = "resampler")] get_resampler: impl FnOnce(
+        ResamplerParams,
+    ) -> &'a mut NonRtResampler<f32>,
 ) -> Result<DecodedAudio, LoadError> {
     #[cfg(feature = "resampler")]
     if let Some(target_sample_rate) = target_sample_rate {
@@ -483,7 +486,9 @@ fn decode_f32<'a>(
     codec_registry: &'static CodecRegistry,
     max_bytes: Option<usize>,
     #[cfg(feature = "resampler")] target_sample_rate: Option<u32>,
-    #[cfg(feature = "resampler")] get_resampler: impl FnOnce(ResamplerParams) -> ResamplerRefMut<'a>,
+    #[cfg(feature = "resampler")] get_resampler: impl FnOnce(
+        ResamplerParams,
+    ) -> &'a mut NonRtResampler<f32>,
 ) -> Result<DecodedAudioF32, LoadError> {
     #[cfg(feature = "resampler")]
     if let Some(target_sample_rate) = target_sample_rate {
@@ -516,7 +521,7 @@ fn resample<'a>(
     codec_registry: &'static CodecRegistry,
     max_bytes: Option<usize>,
     target_sample_rate: u32,
-    get_resampler: impl FnOnce(ResamplerParams) -> ResamplerRefMut<'a>,
+    get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
 ) -> Result<DecodedAudioF32, LoadError> {
     let resampler = get_resampler(ResamplerParams {
         num_channels: source.n_channels,
@@ -524,10 +529,10 @@ fn resample<'a>(
         target_sample_rate,
     });
 
-    if resampler.num_channels() != source.n_channels {
+    if resampler.num_channels().get() != source.n_channels {
         return Err(LoadError::InvalidResampler {
             needed_channels: source.n_channels,
-            got_channels: resampler.num_channels(),
+            got_channels: resampler.num_channels().get(),
         });
     }
 
