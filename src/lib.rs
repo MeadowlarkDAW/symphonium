@@ -4,7 +4,6 @@ use std::path::Path;
 #[cfg(feature = "resampler")]
 use std::collections::HashMap;
 
-use fixed_resample::NonRtResampler;
 use symphonia::core::codecs::CodecRegistry;
 use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::{MediaSource, MediaSourceStream};
@@ -39,7 +38,7 @@ pub static DEFAULT_MAX_BYTES: usize = 1_000_000_000;
 pub struct SymphoniumLoader {
     // Re-use resamplers to improve performance.
     #[cfg(feature = "resampler")]
-    resamplers: HashMap<ResamplerKey, NonRtResampler<f32>>,
+    resamplers: HashMap<ResamplerKey, fixed_resample::NonRtResampler<f32>>,
 
     codec_registry: &'static CodecRegistry,
     probe: &'static Probe,
@@ -166,7 +165,7 @@ impl SymphoniumLoader {
         path: P,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
+        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
     ) -> Result<DecodedAudio, LoadError> {
         let source = load_file(path, self.probe)?;
 
@@ -199,7 +198,7 @@ impl SymphoniumLoader {
         hint: Option<Hint>,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
+        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
     ) -> Result<DecodedAudio, LoadError> {
         let source = load_audio_source(source, hint, self.probe)?;
 
@@ -323,7 +322,7 @@ impl SymphoniumLoader {
         path: P,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
+        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
     ) -> Result<DecodedAudioF32, LoadError> {
         let source = load_file(path, self.probe)?;
 
@@ -357,7 +356,7 @@ impl SymphoniumLoader {
         hint: Option<Hint>,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
+        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
     ) -> Result<DecodedAudioF32, LoadError> {
         let source = load_audio_source(source, hint, self.probe)?;
 
@@ -453,7 +452,10 @@ fn decode<'a>(
     #[cfg(feature = "resampler")] target_sample_rate: Option<u32>,
     #[cfg(feature = "resampler")] get_resampler: impl FnOnce(
         ResamplerParams,
-    ) -> &'a mut NonRtResampler<f32>,
+    )
+        -> &'a mut fixed_resample::NonRtResampler<
+        f32,
+    >,
 ) -> Result<DecodedAudio, LoadError> {
     #[cfg(feature = "resampler")]
     if let Some(target_sample_rate) = target_sample_rate {
@@ -488,7 +490,10 @@ fn decode_f32<'a>(
     #[cfg(feature = "resampler")] target_sample_rate: Option<u32>,
     #[cfg(feature = "resampler")] get_resampler: impl FnOnce(
         ResamplerParams,
-    ) -> &'a mut NonRtResampler<f32>,
+    )
+        -> &'a mut fixed_resample::NonRtResampler<
+        f32,
+    >,
 ) -> Result<DecodedAudioF32, LoadError> {
     #[cfg(feature = "resampler")]
     if let Some(target_sample_rate) = target_sample_rate {
@@ -521,7 +526,7 @@ fn resample<'a>(
     codec_registry: &'static CodecRegistry,
     max_bytes: Option<usize>,
     target_sample_rate: u32,
-    get_resampler: impl FnOnce(ResamplerParams) -> &'a mut NonRtResampler<f32>,
+    get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
 ) -> Result<DecodedAudioF32, LoadError> {
     let resampler = get_resampler(ResamplerParams {
         num_channels: source.n_channels,
