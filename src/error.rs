@@ -32,8 +32,8 @@ impl fmt::Display for LoadError {
             UnkownFormat(e) => write!(f, "Format not supported: {}", e),
             NoTrackFound => write!(f, "No default track found"),
             NoChannelsFound => write!(f, "No channels found"),
-            UnkownChannelFormat(n_channels) => {
-                write!(f, "Unkown channel format: {} channels found", n_channels)
+            UnkownChannelFormat(num_channels) => {
+                write!(f, "Unkown channel format: {} channels found", num_channels)
             }
             FileTooLarge(max_bytes) => {
                 write!(f, "File is too large: maximum is {} bytes", max_bytes)

@@ -35,7 +35,7 @@ pub fn main() {
     let channels = config.channels() as usize;
     let max_buffer_size = match config.buffer_size() {
         SupportedBufferSize::Range { max, .. } => *max,
-        SupportedBufferSize::Unknown => 4096,
+        SupportedBufferSize::Unknown => 8192,
     } as usize;
     assert!(channels == 2);
 
@@ -48,10 +48,11 @@ pub fn main() {
             #[cfg(feature = "resampler")]
             Some(sample_rate),
             #[cfg(feature = "resampler")]
-            symphonium::ResampleQuality::Normal,
+            symphonium::ResampleQuality::default(),
             None,
         )
         .unwrap();
+
     let mut frames_elapsed = 0;
 
     let finished_playing = Arc::new(AtomicBool::new(false));

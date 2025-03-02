@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::num::NonZeroUsize;
 use std::path::Path;
 
 #[cfg(feature = "resampler")]
@@ -33,12 +34,15 @@ use error::LoadError;
 /// The default maximum size of an audio file in bytes.
 pub static DEFAULT_MAX_BYTES: usize = 1_000_000_000;
 
+#[cfg(feature = "resampler")]
+const MAX_CHANNELS: usize = 16;
+
 /// Used to load audio files into RAM. This stores samples in
 /// their native sample format when possible to save memory.
 pub struct SymphoniumLoader {
     // Re-use resamplers to improve performance.
     #[cfg(feature = "resampler")]
-    resamplers: HashMap<ResamplerKey, fixed_resample::NonRtResampler<f32>>,
+    resamplers: HashMap<ResamplerKey, fixed_resample::FixedResampler<f32, MAX_CHANNELS>>,
 
     codec_registry: &'static CodecRegistry,
     probe: &'static Probe,
@@ -165,7 +169,9 @@ impl SymphoniumLoader {
         path: P,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
+        get_resampler: impl FnOnce(
+            ResamplerParams,
+        ) -> &'a mut fixed_resample::FixedResampler<f32, MAX_CHANNELS>,
     ) -> Result<DecodedAudio, LoadError> {
         let source = load_file(path, self.probe)?;
 
@@ -198,7 +204,9 @@ impl SymphoniumLoader {
         hint: Option<Hint>,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
+        get_resampler: impl FnOnce(
+            ResamplerParams,
+        ) -> &'a mut fixed_resample::FixedResampler<f32, MAX_CHANNELS>,
     ) -> Result<DecodedAudio, LoadError> {
         let source = load_audio_source(source, hint, self.probe)?;
 
@@ -322,7 +330,9 @@ impl SymphoniumLoader {
         path: P,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
+        get_resampler: impl FnOnce(
+            ResamplerParams,
+        ) -> &'a mut fixed_resample::FixedResampler<f32, MAX_CHANNELS>,
     ) -> Result<DecodedAudioF32, LoadError> {
         let source = load_file(path, self.probe)?;
 
@@ -356,7 +366,9 @@ impl SymphoniumLoader {
         hint: Option<Hint>,
         target_sample_rate: u32,
         max_bytes: Option<usize>,
-        get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
+        get_resampler: impl FnOnce(
+            ResamplerParams,
+        ) -> &'a mut fixed_resample::FixedResampler<f32, MAX_CHANNELS>,
     ) -> Result<DecodedAudioF32, LoadError> {
         let source = load_audio_source(source, hint, self.probe)?;
 
@@ -373,7 +385,7 @@ impl SymphoniumLoader {
 struct LoadedAudioSource {
     probed: ProbeResult,
     sample_rate: u32,
-    n_channels: usize,
+    num_channels: NonZeroUsize,
 }
 
 fn load_file<P: AsRef<Path>>(
@@ -428,20 +440,20 @@ fn load_audio_source(
         44100
     });
 
-    let n_channels = track
+    let num_channels = track
         .codec_params
         .channels
         .ok_or_else(|| LoadError::NoChannelsFound)?
         .count();
 
-    if n_channels == 0 {
+    if num_channels == 0 {
         return Err(LoadError::NoChannelsFound);
     }
 
     Ok(LoadedAudioSource {
         probed,
         sample_rate,
-        n_channels,
+        num_channels: NonZeroUsize::new(num_channels).unwrap(),
     })
 }
 
@@ -453,8 +465,9 @@ fn decode<'a>(
     #[cfg(feature = "resampler")] get_resampler: impl FnOnce(
         ResamplerParams,
     )
-        -> &'a mut fixed_resample::NonRtResampler<
+        -> &'a mut fixed_resample::FixedResampler<
         f32,
+        MAX_CHANNELS,
     >,
 ) -> Result<DecodedAudio, LoadError> {
     #[cfg(feature = "resampler")]
@@ -474,7 +487,7 @@ fn decode<'a>(
 
     let pcm = decode::decode_native_bitdepth(
         &mut source.probed,
-        source.n_channels,
+        source.num_channels,
         codec_registry,
         source.sample_rate,
         max_bytes.unwrap_or(DEFAULT_MAX_BYTES),
@@ -491,8 +504,9 @@ fn decode_f32<'a>(
     #[cfg(feature = "resampler")] get_resampler: impl FnOnce(
         ResamplerParams,
     )
-        -> &'a mut fixed_resample::NonRtResampler<
+        -> &'a mut fixed_resample::FixedResampler<
         f32,
+        MAX_CHANNELS,
     >,
 ) -> Result<DecodedAudioF32, LoadError> {
     #[cfg(feature = "resampler")]
@@ -511,7 +525,7 @@ fn decode_f32<'a>(
 
     let pcm = decode::decode_f32(
         &mut source.probed,
-        source.n_channels,
+        source.num_channels,
         codec_registry,
         source.sample_rate,
         max_bytes.unwrap_or(DEFAULT_MAX_BYTES),
@@ -526,17 +540,19 @@ fn resample<'a>(
     codec_registry: &'static CodecRegistry,
     max_bytes: Option<usize>,
     target_sample_rate: u32,
-    get_resampler: impl FnOnce(ResamplerParams) -> &'a mut fixed_resample::NonRtResampler<f32>,
+    get_resampler: impl FnOnce(
+        ResamplerParams,
+    ) -> &'a mut fixed_resample::FixedResampler<f32, MAX_CHANNELS>,
 ) -> Result<DecodedAudioF32, LoadError> {
     let resampler = get_resampler(ResamplerParams {
-        num_channels: source.n_channels,
+        num_channels: source.num_channels,
         source_sample_rate: source.sample_rate,
         target_sample_rate,
     });
 
-    if resampler.num_channels().get() != source.n_channels {
+    if resampler.num_channels() != source.num_channels {
         return Err(LoadError::InvalidResampler {
-            needed_channels: source.n_channels,
+            needed_channels: source.num_channels.get(),
             got_channels: resampler.num_channels().get(),
         });
     }
@@ -544,9 +560,8 @@ fn resample<'a>(
     let pcm = decode::decode_resampled(
         &mut source.probed,
         codec_registry,
-        source.sample_rate,
         target_sample_rate,
-        source.n_channels,
+        source.num_channels,
         resampler,
         max_bytes.unwrap_or(DEFAULT_MAX_BYTES),
     )?;
