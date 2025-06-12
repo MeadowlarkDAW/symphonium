@@ -1,4 +1,4 @@
-use super::convert;
+use symphonia::core::{conv::FromSample, sample::u24};
 
 /// A resource of raw f32 audio samples stored in deinterleaved format.
 ///
@@ -50,6 +50,7 @@ impl Into<DecodedAudio> for DecodedAudioF32 {
 ///
 /// This struct stores samples
 /// in their native sample format when possible to save memory.
+#[derive(Debug, Clone)]
 pub struct DecodedAudio {
     resource_type: DecodedAudioType,
     sample_rate: u32,
@@ -62,6 +63,12 @@ pub struct DecodedAudio {
 /// Note that there is no option for U32/I32. This is because in processing
 /// we ultimately use `f32` for everything anyway. We only store the other
 /// types to save memory.
+///
+/// Also note there is no option for `I24` (signed 24 bit). This is because
+/// converting two's compliment numbers from 32 bit to 24 bit and vice-versa
+/// is tricky and less performant. Instead, just convert the data into `u24`
+/// format.
+#[derive(Clone)]
 pub enum DecodedAudioType {
     U8(Vec<Vec<u8>>),
     U16(Vec<Vec<u16>>),
@@ -70,9 +77,6 @@ pub enum DecodedAudioType {
     U24(Vec<Vec<[u8; 3]>>),
     S8(Vec<Vec<i8>>),
     S16(Vec<Vec<i16>>),
-    /// The endianness of the samples must be the native endianness of the
-    /// target platform.
-    S24(Vec<Vec<[u8; 3]>>),
     F32(Vec<Vec<f32>>),
     F64(Vec<Vec<f64>>),
 }
@@ -117,15 +121,6 @@ impl DecodedAudio {
                 (b.len(), len)
             }
             DecodedAudioType::S16(b) => {
-                let len = b[0].len();
-
-                for ch in b.iter().skip(1) {
-                    assert_eq!(ch.len(), len);
-                }
-
-                (b.len(), len)
-            }
-            DecodedAudioType::S24(b) => {
                 let len = b[0].len();
 
                 for ch in b.iter().skip(1) {
@@ -220,42 +215,45 @@ impl DecodedAudio {
                 let pcm_part = &pcm[channel][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_part[i] = convert::pcm_u8_to_f32(pcm_part[i]);
+                    buf_part[i] = FromSample::from_sample(pcm_part[i]);
                 }
             }
             DecodedAudioType::U16(pcm) => {
                 let pcm_part = &pcm[channel][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_part[i] = convert::pcm_u16_to_f32(pcm_part[i]);
+                    buf_part[i] = FromSample::from_sample(pcm_part[i]);
                 }
             }
             DecodedAudioType::U24(pcm) => {
                 let pcm_part = &pcm[channel][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_part[i] = convert::pcm_u24_to_f32_ne(pcm_part[i]);
+                    let b = &pcm_part[i];
+
+                    let s = if cfg!(target_endian = "little") {
+                        // In little-endian the MSB is the last byte.
+                        u24(u32::from_le_bytes([b[0], b[1], b[2], 0]))
+                    } else {
+                        // In big-endian the MSB is the first byte.
+                        u24(u32::from_be_bytes([0, b[1], b[2], b[3]]))
+                    };
+
+                    buf_part[i] = FromSample::from_sample(s);
                 }
             }
             DecodedAudioType::S8(pcm) => {
                 let pcm_part = &pcm[channel][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_part[i] = convert::pcm_i8_to_f32(pcm_part[i]);
+                    buf_part[i] = FromSample::from_sample(pcm_part[i]);
                 }
             }
             DecodedAudioType::S16(pcm) => {
                 let pcm_part = &pcm[channel][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_part[i] = convert::pcm_i16_to_f32(pcm_part[i]);
-                }
-            }
-            DecodedAudioType::S24(pcm) => {
-                let pcm_part = &pcm[channel][frame..frame + fill_frames];
-
-                for i in 0..fill_frames {
-                    buf_part[i] = convert::pcm_i24_to_f32_ne(pcm_part[i]);
+                    buf_part[i] = FromSample::from_sample(pcm_part[i]);
                 }
             }
             DecodedAudioType::F32(pcm) => {
@@ -321,8 +319,8 @@ impl DecodedAudio {
                 let pcm_r_part = &pcm[1][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_l_part[i] = convert::pcm_u8_to_f32(pcm_l_part[i]);
-                    buf_r_part[i] = convert::pcm_u8_to_f32(pcm_r_part[i]);
+                    buf_l_part[i] = FromSample::from_sample(pcm_l_part[i]);
+                    buf_r_part[i] = FromSample::from_sample(pcm_r_part[i]);
                 }
             }
             DecodedAudioType::U16(pcm) => {
@@ -330,8 +328,8 @@ impl DecodedAudio {
                 let pcm_r_part = &pcm[1][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_l_part[i] = convert::pcm_u16_to_f32(pcm_l_part[i]);
-                    buf_r_part[i] = convert::pcm_u16_to_f32(pcm_r_part[i]);
+                    buf_l_part[i] = FromSample::from_sample(pcm_l_part[i]);
+                    buf_r_part[i] = FromSample::from_sample(pcm_r_part[i]);
                 }
             }
             DecodedAudioType::U24(pcm) => {
@@ -339,8 +337,25 @@ impl DecodedAudio {
                 let pcm_r_part = &pcm[1][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_l_part[i] = convert::pcm_u24_to_f32_ne(pcm_l_part[i]);
-                    buf_r_part[i] = convert::pcm_u24_to_f32_ne(pcm_r_part[i]);
+                    let b_l = &pcm_l_part[i];
+                    let b_r = &pcm_r_part[i];
+
+                    let (s_l, s_r) = if cfg!(target_endian = "little") {
+                        // In little-endian the MSB is the last byte. Drop it.
+                        (
+                            u24(u32::from_le_bytes([b_l[0], b_l[1], b_l[2], 0])),
+                            u24(u32::from_le_bytes([b_r[0], b_r[1], b_r[2], 0])),
+                        )
+                    } else {
+                        // In big-endian the MSB is the first byte. Drop it.
+                        (
+                            u24(u32::from_be_bytes([0, b_l[1], b_l[2], b_l[3]])),
+                            u24(u32::from_be_bytes([0, b_r[1], b_r[2], b_r[3]])),
+                        )
+                    };
+
+                    buf_l_part[i] = FromSample::from_sample(s_l);
+                    buf_r_part[i] = FromSample::from_sample(s_r);
                 }
             }
             DecodedAudioType::S8(pcm) => {
@@ -348,8 +363,8 @@ impl DecodedAudio {
                 let pcm_r_part = &pcm[1][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_l_part[i] = convert::pcm_i8_to_f32(pcm_l_part[i]);
-                    buf_r_part[i] = convert::pcm_i8_to_f32(pcm_r_part[i]);
+                    buf_l_part[i] = FromSample::from_sample(pcm_l_part[i]);
+                    buf_r_part[i] = FromSample::from_sample(pcm_r_part[i]);
                 }
             }
             DecodedAudioType::S16(pcm) => {
@@ -357,17 +372,8 @@ impl DecodedAudio {
                 let pcm_r_part = &pcm[1][frame..frame + fill_frames];
 
                 for i in 0..fill_frames {
-                    buf_l_part[i] = convert::pcm_i16_to_f32(pcm_l_part[i]);
-                    buf_r_part[i] = convert::pcm_i16_to_f32(pcm_r_part[i]);
-                }
-            }
-            DecodedAudioType::S24(pcm) => {
-                let pcm_l_part = &pcm[0][frame..frame + fill_frames];
-                let pcm_r_part = &pcm[1][frame..frame + fill_frames];
-
-                for i in 0..fill_frames {
-                    buf_l_part[i] = convert::pcm_i24_to_f32_ne(pcm_l_part[i]);
-                    buf_r_part[i] = convert::pcm_i24_to_f32_ne(pcm_r_part[i]);
+                    buf_l_part[i] = FromSample::from_sample(pcm_l_part[i]);
+                    buf_r_part[i] = FromSample::from_sample(pcm_r_part[i]);
                 }
             }
             DecodedAudioType::F32(pcm) => {
@@ -394,6 +400,55 @@ impl DecodedAudio {
     /// Consume this resource and return the raw samples.
     pub fn into_raw(self) -> DecodedAudioType {
         self.resource_type
+    }
+}
+
+impl std::fmt::Debug for DecodedAudioType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::U8(c) => write!(
+                f,
+                "DecodedAudioType::U8 {{ channels: {}, frames: {} }}",
+                c.len(),
+                c[0].len()
+            ),
+            Self::U16(c) => write!(
+                f,
+                "DecodedAudioType::U16 {{ channels: {}, frames: {} }}",
+                c.len(),
+                c[0].len()
+            ),
+            Self::U24(c) => write!(
+                f,
+                "DecodedAudioType::U24 {{ channels: {}, frames: {} }}",
+                c.len(),
+                c[0].len()
+            ),
+            Self::S8(c) => write!(
+                f,
+                "DecodedAudioType::S8 {{ channels: {}, frames: {} }}",
+                c.len(),
+                c[0].len()
+            ),
+            Self::S16(c) => write!(
+                f,
+                "DecodedAudioType::S16 {{ channels: {}, frames: {} }}",
+                c.len(),
+                c[0].len()
+            ),
+            Self::F32(c) => write!(
+                f,
+                "DecodedAudioType::F32 {{ channels: {}, frames: {} }}",
+                c.len(),
+                c[0].len()
+            ),
+            Self::F64(c) => write!(
+                f,
+                "DecodedAudioType::F64 {{ channels: {}, frames: {} }}",
+                c.len(),
+                c[0].len()
+            ),
+        }
     }
 }
 

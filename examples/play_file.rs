@@ -46,12 +46,16 @@ pub fn main() {
         .load(
             file_path,
             #[cfg(feature = "resampler")]
+            // Try changing this to `Some(44100)` or `Some(48000)` to
+            // see automatic resampling in action.
             Some(sample_rate),
             #[cfg(feature = "resampler")]
             symphonium::ResampleQuality::default(),
             None,
         )
         .unwrap();
+
+    dbg!(&audio_data);
 
     let mut frames_elapsed = 0;
 

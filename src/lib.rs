@@ -14,7 +14,6 @@ use symphonia::core::probe::{Hint, Probe, ProbeResult};
 // Re-export symphonia
 pub use symphonia;
 
-pub mod convert;
 pub mod error;
 
 #[cfg(feature = "resampler")]

@@ -4,13 +4,14 @@ use std::num::NonZeroUsize;
 use symphonia::core::audio::AudioBufferRef;
 use symphonia::core::audio::{AudioBuffer, Signal};
 use symphonia::core::codecs::{CodecRegistry, DecoderOptions};
+use symphonia::core::conv::FromSample;
 use symphonia::core::probe::ProbeResult;
 use symphonia::core::sample::{i24, u24};
 
 use crate::DecodedAudioF32;
 
 use super::resource::{DecodedAudio, DecodedAudioType};
-use super::{convert, LoadError};
+use super::LoadError;
 
 const SHRINK_THRESHOLD: usize = 4096;
 
@@ -748,7 +749,7 @@ pub(crate) fn decode_native_bitdepth(
 
             shrink_buffer(&mut decoded_channels);
 
-            DecodedAudioType::S24(decoded_channels)
+            DecodedAudioType::U24(decoded_channels)
         }
         FirstPacketType::S32(mut decoded_channels) => {
             while let Ok(packet) = probed.format.next_packet() {
@@ -889,9 +890,7 @@ fn decode_u32_packet(
 ) {
     for i in 0..num_channels.get() {
         for s in packet.chan(i).iter() {
-            let s_f32 = convert::pcm_u32_to_f32(*s);
-
-            decoded_channels[i].push(s_f32);
+            decoded_channels[i].push(FromSample::from_sample(*s));
         }
     }
 }
@@ -926,7 +925,10 @@ fn decode_i24_packet(
 ) {
     for i in 0..num_channels.get() {
         for s in packet.chan(i).iter() {
-            decoded_channels[i].push(s.to_ne_bytes());
+            // Converting a two's compiliment number from 32 bit to 24 bit and vice-versa
+            // is tricky and less performant. So instead just convert the sample to `u24`
+            // format.
+            decoded_channels[i].push(u24::from_sample(*s).to_ne_bytes());
         }
     }
 }
@@ -939,9 +941,7 @@ fn decode_i32_packet(
 ) {
     for i in 0..num_channels.get() {
         for s in packet.chan(i).iter() {
-            let s_f32 = convert::pcm_i32_to_f32(*s);
-
-            decoded_channels[i].push(s_f32);
+            decoded_channels[i].push(FromSample::from_sample(*s));
         }
     }
 }
