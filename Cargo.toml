@@ -1,6 +1,6 @@
 [package]
 name = "symphonium"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 license = "MPL-2.0"
 readme = "README.md"
@@ -97,9 +97,13 @@ resampler = ["dep:fixed-resample"]
 # Disable if you only need the `Low` resampling quality.
 fft-resampler = ["resampler", "fixed-resample?/fft-resampler"]
 
+# Enables the "arbitrary sinc" resampler for changing the pitch/length
+# of samples.
+stretch-sinc-resampler = ["resampler"]
+
 [dependencies]
 symphonia = { version = "0.5.4", default-features = false }
-fixed-resample = { version = "0.8.0", default-features = false, features = ["resampler"], optional = true }
+fixed-resample = { version = "0.9.1", default-features = false, features = ["resampler"], optional = true }
 log = "0.4"
 
 [dev-dependencies]
@@ -109,3 +113,8 @@ simple-log = "2.1.1"
 # Decoding audio can be quite slow without any optimizations.
 [profile.dev]
 opt-level = 1 
+
+[[example]]
+name = "play_file_stretched"
+path = "examples/play_file_stretched.rs"
+required-features = ["stretch-sinc-resampler"]

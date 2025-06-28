@@ -58,7 +58,7 @@ impl SymphoniumLoader {
         }
     }
 
-    /// Load an audio file from the given path into RAM.
+    /// Load an audio file from the given path.
     ///
     /// * `path` - The path to the audio file stored on disk.
     /// * `target_sample_rate` - If this is `Some`, then the file will be resampled to that
@@ -103,7 +103,7 @@ impl SymphoniumLoader {
         )
     }
 
-    /// Load an audio source into RAM.
+    /// Load an audio source from RAM.
     ///
     /// * `source` - The audio source which implements the [`MediaSource`] trait.
     /// * `hint` - An optional hint to help the format registry guess what format reader is
@@ -151,7 +151,7 @@ impl SymphoniumLoader {
         )
     }
 
-    /// Load an audio file from the given path into RAM using a custom resampler.
+    /// Load an audio file from the given path using a custom resampler.
     ///
     /// * `path` - The path to the audio file stored on disk.
     /// * `target_sample_rate` - The target sample rate. (No resampling will occur if the audio
@@ -183,7 +183,7 @@ impl SymphoniumLoader {
         )
     }
 
-    /// Load an audio source into RAM using a custom resampler.
+    /// Load an audio source from RAM using a custom resampler.
     ///
     /// * `source` - The audio source which implements the [`MediaSource`] trait.
     /// * `hint` - An optional hint to help the format registry guess what format reader is
@@ -218,7 +218,7 @@ impl SymphoniumLoader {
         )
     }
 
-    /// Load an audio file from the given path into RAM and convert to an f32 sample format.
+    /// Load an audio file from the given path and convert to an f32 sample format.
     ///
     /// * `path` - The path to the audio file stored on disk.
     /// * `target_sample_rate` - If this is `Some`, then the file will be resampled to that
@@ -263,7 +263,7 @@ impl SymphoniumLoader {
         )
     }
 
-    /// Load an audio source into RAM and convert to an f32 sample format.
+    /// Load an audio source from RAM and convert to an f32 sample format.
     ///
     /// * `source` - The audio source which implements the [`MediaSource`] trait.
     /// * `hint` - An optional hint to help the format registry guess what format reader is
@@ -311,8 +311,8 @@ impl SymphoniumLoader {
         )
     }
 
-    /// Load an audio source into RAM using a custom resampler and convert to an f32 sample
-    /// format.
+    /// Load an audio file from the given path using a custom resampler and convert to an f32
+    /// sample format.
     ///
     /// * `path` - The path to the audio file stored on disk.
     /// * `target_sample_rate` - The target sample rate. (No resampling will occur if the audio
@@ -344,7 +344,7 @@ impl SymphoniumLoader {
         )
     }
 
-    /// Load an audio source into RAM using a custom resampler and convert to an f32 sample
+    /// Load an audio source from RAM using a custom resampler and convert to an f32 sample
     /// format.
     ///
     /// * `source` - The audio source which implements the [`MediaSource`] trait.
@@ -377,6 +377,89 @@ impl SymphoniumLoader {
             max_bytes,
             Some(target_sample_rate),
             get_resampler,
+        )
+    }
+
+    /// Load an audio file from the given path and convert to an f32 sample format. The sample will
+    /// be stretched (pitch shifted) by the given amount.
+    ///
+    /// * `source` - The audio source which implements the [`MediaSource`] trait.
+    /// * `stretch` - The amount of stretching (`new_length / old_length`). A value of `1.0` is no
+    /// change, a value less than `1.0` will increase the pitch & decrease the length, and a value
+    /// greater than `1.0` will decrease the pitch & increase the length. If a `target_sample_rate`
+    /// is given, then the final amount will automatically be adjusted to account for that.
+    /// * `target_sample_rate` - If this is `Some`, then the file will be resampled to that
+    /// sample rate. If this is `None`, then the file will not be resampled and it will stay its
+    /// original sample rate.
+    ///     * Note that resampling will always convert the sample format to `f32`. If
+    /// saving memory is a concern, then set this to `None` and resample in realtime.
+    /// * `resample_quality` - The quality of the resampler to use if the `target_sample_rate`
+    /// doesn't match the source sample rate.
+    ///     - Has no effect if `target_sample_rate` is `None`.
+    /// * `max_bytes` - The maximum size in bytes that the resulting `DecodedAudio`
+    /// resource can  be in RAM. If the resulting resource is larger than this, then an error
+    /// will be returned instead. This is useful to avoid locking up or crashing the system
+    /// if the use tries to load a really large audio file.
+    ///     * If this is `None`, then default of `1_000_000_000` (1GB) will be used.
+    #[cfg(feature = "stretch-sinc-resampler")]
+    pub fn load_f32_stretched<P: AsRef<Path>>(
+        &mut self,
+        path: P,
+        stretch: f64,
+        target_sample_rate: Option<u32>,
+        max_bytes: Option<usize>,
+    ) -> Result<DecodedAudioF32, LoadError> {
+        let source = load_file(path, self.probe)?;
+
+        decode_f32_stretched(
+            source,
+            stretch,
+            self.codec_registry,
+            max_bytes,
+            target_sample_rate,
+        )
+    }
+
+    /// Load an audio source from RAM and convert to an f32 sample format. The sample will be
+    /// stretched (pitch shifted) by the given amount.
+    ///
+    /// * `source` - The audio source which implements the [`MediaSource`] trait.
+    /// * `hint` - An optional hint to help the format registry guess what format reader is
+    /// appropriate.
+    /// * `stretch` - The amount of stretching (`new_length / old_length`). A value of `1.0` is no
+    /// change, a value less than `1.0` will increase the pitch & decrease the length, and a value
+    /// greater than `1.0` will decrease the pitch & increase the length. If a `target_sample_rate`
+    /// is given, then the final amount will automatically be adjusted to account for that.
+    /// * `target_sample_rate` - If this is `Some`, then the file will be resampled to that
+    /// sample rate. If this is `None`, then the file will not be resampled and it will stay its
+    /// original sample rate.
+    ///     * Note that resampling will always convert the sample format to `f32`. If
+    /// saving memory is a concern, then set this to `None` and resample in realtime.
+    /// * `resample_quality` - The quality of the resampler to use if the `target_sample_rate`
+    /// doesn't match the source sample rate.
+    ///     - Has no effect if `target_sample_rate` is `None`.
+    /// * `max_bytes` - The maximum size in bytes that the resulting `DecodedAudio`
+    /// resource can  be in RAM. If the resulting resource is larger than this, then an error
+    /// will be returned instead. This is useful to avoid locking up or crashing the system
+    /// if the use tries to load a really large audio file.
+    ///     * If this is `None`, then default of `1_000_000_000` (1GB) will be used.
+    #[cfg(feature = "stretch-sinc-resampler")]
+    pub fn load_f32_from_source_stretched<P: AsRef<Path>>(
+        &mut self,
+        source: Box<dyn MediaSource>,
+        hint: Option<Hint>,
+        stretch: f64,
+        target_sample_rate: Option<u32>,
+        max_bytes: Option<usize>,
+    ) -> Result<DecodedAudioF32, LoadError> {
+        let source = load_audio_source(source, hint, self.probe)?;
+
+        decode_f32_stretched(
+            source,
+            stretch,
+            self.codec_registry,
+            max_bytes,
+            target_sample_rate,
         )
     }
 }
@@ -556,14 +639,66 @@ fn resample<'a>(
         });
     }
 
-    let pcm = decode::decode_resampled(
+    decode::decode_resampled(
         &mut source.probed,
         codec_registry,
         target_sample_rate,
         source.num_channels,
         resampler,
         max_bytes.unwrap_or(DEFAULT_MAX_BYTES),
-    )?;
+    )
+}
 
-    return Ok(pcm);
+#[cfg(feature = "stretch-sinc-resampler")]
+fn decode_f32_stretched(
+    mut source: LoadedAudioSource,
+    stretch: f64,
+    codec_registry: &'static CodecRegistry,
+    max_bytes: Option<usize>,
+    target_sample_rate: Option<u32>,
+) -> Result<DecodedAudioF32, LoadError> {
+    use fixed_resample::FixedResampler;
+
+    let mut needs_resample = stretch != 1.0;
+    if !needs_resample {
+        if let Some(target_sample_rate) = target_sample_rate {
+            needs_resample = source.sample_rate != target_sample_rate;
+        }
+    }
+
+    if needs_resample {
+        let out_sample_rate = target_sample_rate.unwrap_or(source.sample_rate);
+        let ratio = (out_sample_rate as f64 / source.sample_rate as f64) * stretch;
+
+        let mut resampler = FixedResampler::<f32, MAX_CHANNELS>::arbitrary_ratio_sinc(
+            source.sample_rate,
+            ratio,
+            source.num_channels,
+            false,
+        );
+
+        if resampler.num_channels() != source.num_channels {
+            return Err(LoadError::InvalidResampler {
+                needed_channels: source.num_channels.get(),
+                got_channels: resampler.num_channels().get(),
+            });
+        }
+
+        return decode::decode_resampled(
+            &mut source.probed,
+            codec_registry,
+            out_sample_rate,
+            source.num_channels,
+            &mut resampler,
+            max_bytes.unwrap_or(DEFAULT_MAX_BYTES),
+        );
+    }
+
+    decode::decode_f32(
+        &mut source.probed,
+        source.num_channels,
+        codec_registry,
+        source.sample_rate,
+        max_bytes.unwrap_or(DEFAULT_MAX_BYTES),
+    )
 }
