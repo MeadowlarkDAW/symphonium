@@ -444,7 +444,7 @@ impl SymphoniumLoader {
     /// if the use tries to load a really large audio file.
     ///     * If this is `None`, then default of `1_000_000_000` (1GB) will be used.
     #[cfg(feature = "stretch-sinc-resampler")]
-    pub fn load_f32_from_source_stretched<P: AsRef<Path>>(
+    pub fn load_f32_from_source_stretched(
         &mut self,
         source: Box<dyn MediaSource>,
         hint: Option<Hint>,
